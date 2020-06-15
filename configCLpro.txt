@@ -1,18 +1,11 @@
 receptor =1p9u.pdbqt
-ligand =ligand.pdbqt
 
-center_x =  0.1
-center_y =  0.1
-center_z =  0.1
+center_x =  31.6
+center_y =  33.1
+center_z =  48.8
 
-size_x = 100
-size_y = 100
-size_z = 100
+size_x = 22.5
+size_y = 22.5
+size_z = 22.5
 
-out= vina_out1.pdbqt
-
-log= lognew1.txt
-
-
-
-exhaustiveness= 100
+exhaustiveness= 24
