@@ -1,11 +1,11 @@
-receptor =6w9c.pdbqt
+receptor = ../6w9c.pdbqt
 
 center_x = -26.3
 center_y = 21.0
 center_z = 34.0
 
-size_x = 22.5
-size_y = 22.5
-size_z = 22.5
+size_x = 24
+size_y = 24
+size_z = 24
 
 exhaustiveness= 24

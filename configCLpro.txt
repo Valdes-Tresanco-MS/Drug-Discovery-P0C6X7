@@ -1,11 +1,11 @@
-receptor =1p9u.pdbqt
+receptor = ../1p9u.pdbqt
 
 center_x =  31.6
 center_y =  33.1
 center_z =  48.8
 
-size_x = 22.5
-size_y = 22.5
-size_z = 22.5
+size_x = 24
+size_y = 24
+size_z = 24
 
 exhaustiveness= 24
