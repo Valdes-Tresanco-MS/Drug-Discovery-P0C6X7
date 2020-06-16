@@ -17,14 +17,15 @@ import seaborn as seabornInstance
 from sklearn.model_selection import train_test_split 
 from sklearn.linear_model import LinearRegression
 from sklearn import metrics
-
+import re
 import time
 
 
 
 
 
-link1 = "https://pubchem.ncbi.nlm.nih.gov/sdq/cgi2rcgi.cgi?infmt=json&outfmt=csv&query={%22download%22:%22*%22,%22collection%22:%22bioactivity%22,%22where%22:{%22ands%22:[{%22protacxn%22:%22notnull%22},{%22cid%22:%22notnull%22},{%22repacxn%22:%22P0C6X7%22}]},%22order%22:[%22activity,asc%22],%22start%22:1,%22limit%22:10000000,%22downloadfilename%22:%22PROTACXN_P0C6X7_bioactivity_protein%22}"
+link1 = "https://pubchem.ncbi.nlm.nih.gov/sdq/cgi2rcgi.cgi?infmt=json&outfmt=csv&query={%22download%22:%22*%22,%22collection%22:%22bioactivity%22,%22where%22:{%22ands%22:[{%22protacxn%22:%22notnull%22},{%22cid%22:%22notnull%22},{%22repacxn%22:%22P0C6X7%22}]},%22order%22:[%22activity,asc%22],%22start%22:1,%22limit%22:10000000,%22downloadfilename%22:%" \
+        "%22}"
 
 
 
@@ -745,20 +746,117 @@ import os
 l=[]
 for itter in top_cid:
     l.append(itter)
-for i in l:
-    url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{}/SDF'.format(i)
-    urllib.request.urlretrieve(url, 'Lig.sdf')
-    
-    
-  
-    os.system('babel -isdf Lig.sdf -opdbqt ligand.pdbqt')
-    
-    
-    os.system('vina --config configCLpro.txt')
 
-  
-    os.system('vina --config configPLpro.txt')
-    
-    print(url)
-    
-    input("Press any key to continue")
+def result2pdb(filename, ligname, recname):
+    # check if exist docking result
+    affinity = []
+    all_result = open(f'{ligname}_{recname}result.pdb', 'w')
+    models = 1
+    result = open(filename, 'r')
+    for line in result:
+        line = line.strip('\n')
+        if line[:5] == 'MODEL':
+            all_result.write('MODEL' + ('%d' % models).rjust(9) + '\n')
+            models += 1
+        elif line[:5] == 'ATOM' or line[:6] == 'HETATM':
+            all_result.write('HETATM' + line[7:67] + line[13:14].rjust(11) + '\n')
+        elif line[:6] == 'ENDMDL':
+            all_result.write(line + '\n')
+        if re.search('REMARK VINA RESULT', line):
+            affinity.append(float(line.split()[3].strip()))
+            all_result.write('REMARK ENERGY   =   %s\n' % line.split()[3].strip())
+
+    result.close()
+    all_result.close()
+    return affinity
+
+
+try:
+    if os.path.exists('ligands'):
+        print('The ligand folder already exist. Renaming...')
+        os.rename('ligands', f"ligands_old_{time.time()}")
+    os.mkdir('ligands')
+    os.chdir('ligands')
+except IOError as e:
+    raise e('It not possible create ligands folder...')
+
+# info
+lig_info = {}
+# list of molecules
+ms = []
+
+for i in l:
+    os.mkdir(f'{i}')
+    os.mkdir(f'{i}/input')
+    url = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/{}/SDF'.format(i)
+    print(f'Downloading {i} compound file...')
+    urllib.request.urlretrieve(url, f'{i}/input/PC_{i}.sdf')
+    print(f'Downloading {i} compound file... Done.')
+    print('Generating 3D mol files...')
+    m = Chem.MolFromMolFile(f'{i}/input/PC_{i}.sdf')
+    num_ha = m.GetNumAtoms()
+    AllChem.Compute2DCoords(m)
+    # add molecule to list for grid image
+    ms.append(m)
+    m2 = Chem.AddHs(m)
+    # generate 3D coordinates
+    AllChem.EmbedMolecule(m2, randomSeed=0xf00d)
+    # write molecule in pdb format
+    w = Chem.PDBWriter(f'{i}/input/PC_{i}.pdb')
+    w.write(m2)
+    print('Generating 3D mol files... Done')
+
+    print('Preparing input...')
+
+    p = subprocess.Popen([this_python, prepare_ligand4, '-l', f'{i}/input/PC_{i}.pdb', '-o', f'{i}/input/PC_{i}.pdbqt'])
+    p.wait()
+    print('Preparing input... Done')
+    print('Molecular Docking...')
+    p1 = subprocess.Popen([vina, '--config', '../configCLpro.txt', '--ligand', f'{i}/input/PC_{i}.pdbqt', '--out',
+                           f'{i}/PC_{i}_CLout.pdbqt', '--log', f'{i}/PC_{i}_CLout.log', '--cpu', '8'])
+    p1.wait()
+
+    s = result2pdb(f'{i}/PC_{i}_CLout.pdbqt', i, 'CL')
+
+    p2 = subprocess.Popen([vina, '--config', '../configPLpro.txt', '--ligand', f'{i}/input/PC_{i}.pdbqt', '--out',
+                           f'{i}/PC_{i}_PLout.pdbqt', '--log', f'{i}/PC_{i}_PLout.log', '--cpu', '8'])
+    p2.wait()
+
+    s1 = result2pdb(f'{i}/PC_{i}_PLout.pdbqt', i, 'PL')
+    print('Molecular Docking... Done.')
+
+    # lig_info contain num_ha, list(affinity for CL), list(affinity for PL)
+    lig_info[i] = [num_ha, s, s1]
+
+
+Draw.DrawingOptions.atomLabelFontSize = 150
+Draw.DrawingOptions.dotsPerAngstrom = 1500
+Draw.DrawingOptions.bondLineWidth = 2
+img = Draw.MolsToGridImage(ms, molsPerRow=5, subImgSize=(500, 450), legends=[x.GetProp("_Name") for x in ms],
+                               legendFontSize=150)
+img.save('2Dcompounds.png')
+print('Drawing grind image... Done')
+
+os.chdir(os.path.pardir)
+
+
+print('=' * 139)
+print(' Result for 3-Cysteine like Protease (3CLPro) [ PDB: 1p9u ]'.center(139))
+print('-' * 139)
+print('  Compound   |' + 'Poses/Ligand Efficiency'.center(125) + '|')
+print('     ID      |' + '|'.join([('%s'.center(14)) % x for x in range(1, 10)]) + '|')
+print('|'.join(['-' * 13 for x in range(0, 10)]) + '|')
+
+for lig in lig_info:
+    print(f'{lig}'.center(13) + '|' +
+          '|'.join('{:.1f}/{:.2f}'.format(x, x / lig_info[lig][0]).center(13) for x in lig_info[lig][1]) + '|')
+print('=' * 139)
+print(' Result for Papain  like  protease  (PLpro)  [ PDB: 6w9c ]'.center(139))
+print('-' * 139)
+print('  Compound   |' + 'Poses/Ligand Efficiency'.center(125) + '|')
+print('     ID      |' + '|'.join([('%s'.center(14)) % x for x in range(1, 10)]) + '|')
+print('|'.join(['-' * 13 for x in range(0, 10)]) + '|')
+for lig in lig_info:
+    print(f'{lig}'.center(13) + '|' +
+          '|'.join('{:.1f}/{:.2f}'.format(x, x / lig_info[lig][0]).center(13) for x in lig_info[lig][2]) + '|')
+print('=' * 139)
